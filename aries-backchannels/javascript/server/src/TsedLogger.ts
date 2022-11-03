@@ -25,7 +25,7 @@ export class TsedLogger extends BaseLogger {
     const tsedLogLevel = this.tsedLogLevelMap[level]
 
     if (data) {
-      this.logger[tsedLogLevel](message, util.inspect(data, { showHidden: false, depth: null }))
+      this.logger[tsedLogLevel](message, util.inspect(data, { showHidden: false, depth: 1 }))
     } else {
       this.logger[tsedLogLevel](message)
     }

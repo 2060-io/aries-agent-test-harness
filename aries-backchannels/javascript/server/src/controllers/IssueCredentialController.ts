@@ -36,6 +36,8 @@ export class IssueCredentialController extends BaseController {
     if (!credential) {
       throw new NotFound(`credential for thead id "${threadId}" not found.`)
     }
+
+    this.agent.config.logger.info(`Credential state: ${credential.state}`)
     return this.mapCredential(credential)
   }
 
@@ -80,6 +82,34 @@ export class IssueCredentialController extends BaseController {
     })
 
     return this.mapCredential(credentialRecord)
+  }
+ 
+  @Post('/create-offer')
+  async createOffer(
+    @BodyParams('id') threadId?: string,
+    @BodyParams('data')
+    data?: {
+      connection_id: string
+      cred_def_id: string
+      credential_preview: any
+    }
+  ) {
+
+    if (data) {
+      const preview = JsonTransformer.fromJSON(data.credential_preview, V1CredentialPreview)
+      const { message, credentialRecord } = await this.agent.credentials.createOffer({
+        protocolVersion: 'v1',
+        credentialFormats: {
+          indy: {
+            attributes: preview.attributes,
+            credentialDefinitionId: data.cred_def_id,
+          },
+        },
+      })
+      return { message: message.toJSON(), record: credentialRecord.toJSON() }
+    } else {
+      throw new BadRequest(`Missing both id and data properties`)
+    }
   }
 
   @Post('/send-offer')

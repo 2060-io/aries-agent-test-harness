@@ -1,4 +1,4 @@
-import { Agent, ConnectionRecord } from '@aries-framework/core'
+import { Agent, ConnectionRecord, ConnectionResponseMessage } from '@aries-framework/core'
 import { NotFound } from '@tsed/exceptions'
 
 export class ConnectionUtils {
@@ -11,8 +11,12 @@ export class ConnectionUtils {
 
     if (connection) return connection
 
-    const connections = await agent.connections.findAllByOutOfBandId(id)
+    let connections = await agent.connections.findAllByOutOfBandId(id)
 
+    if (connections.length === 0) {
+      const oob = await agent.oob.findByInvitationId(id) 
+      if (oob) connections = await agent.connections.findAllByOutOfBandId(oob.id)
+    }
     if (connections.length === 0) throw new NotFound(`Connection with id ${id} not found`)
 
     return connections[0]

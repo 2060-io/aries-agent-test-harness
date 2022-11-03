@@ -19,9 +19,8 @@ import { BaseController } from '../BaseController'
 import { TestHarnessConfig } from '../TestHarnessConfig'
 import { ConnectionUtils } from '../utils/ConnectionUtils'
 import { V1ProofService } from '@aries-framework/core/build/modules/proofs/protocol/v1/V1ProofService'
-import { PresentationPreview } from '@aries-framework/core/build/modules/proofs/protocol/v1/models/V1PresentationPreview'
-@Controller('/agent/command/proof')
-export class PresentProofController extends BaseController {
+@Controller('/agent/command/proof-v2')
+export class PresentProofV2Controller extends BaseController {
   private logger: Logger
   private subject = new ReplaySubject<ProofStateChangedEvent>()
 
@@ -37,82 +36,18 @@ export class PresentProofController extends BaseController {
     this.agent.events.observable<ProofStateChangedEvent>(ProofEventTypes.ProofStateChanged).subscribe(this.subject)
   }
 
-  @Get('/:threadId')
-  async getProofByThreadId(@PathParams('threadId') threadId: string) {
-    const proofRecord = await ProofUtils.getProofByThreadId(this.agent, threadId)
-
-    if (!proofRecord) {
-      throw new NotFound(`proof record for thead id "${threadId}" not found.`)
-    }
-
-    return this.mapProofExchangeRecord(proofRecord)
-  }
-
-  @Get('/')
-  async getAllProofs() {
-    const proofs = await this.agent.proofs.getAll()
-
-    return proofs.map((proof) => this.mapProofExchangeRecord(proof))
-  }
-
-  @Post('/send-proposal')
-  async sendProposal(
-    @BodyParams('data')
-    data: {
-      connection_id: string
-      presentation_proposal: {
-        comment?: string
-        attributes: any
-        predicates: any
-      }
-    }
-  ) {
-
-    const presentationProposal = JsonTransformer.fromJSON(data.presentation_proposal, PresentationPreview)
-    const { attributes, predicates } = presentationProposal
-
-    const connection = await ConnectionUtils.getConnectionByConnectionIdOrOutOfBandId(this.agent, data.connection_id)
-
-    const proofRecord = await this.agent.proofs.proposeProof({
-      connectionId: connection.id, 
-      protocolVersion: 'v1',
-      proofFormats: {
-        indy: {
-          name: 'proposeProof',
-          version: '1.0',
-          nonce: await this.agent.injectionContainer.resolve(V1ProofService).generateProofRequestNonce(),
-          attributes,
-          predicates,
-        },
-      },
-      comment: data.presentation_proposal.comment
-    })
-
-    return this.mapProofExchangeRecord(proofRecord)
-  }
-
   @Post('/create-request')
   async createRequest(
     @BodyParams('data')
-    data: {
-      connection_id: string
-      presentation_request: {
-        comment?: string
-        proof_request: {
-          data: unknown
-        }
-      }
-    }
+    data: unknown
   ) {
     // Do not validate, we only need a few properties from the proof request
-    const proofRequestData = JsonTransformer.fromJSON(data.presentation_request.proof_request.data, ProofRequest, {
+    const proofRequestData = JsonTransformer.fromJSON(data, ProofRequest, {
       validate: false,
     })
 
-    const connection = await ConnectionUtils.getConnectionByConnectionIdOrOutOfBandId(this.agent, data.connection_id)
-
     const { message, proofRecord } = await this.agent.proofs.createRequest({
-      protocolVersion: 'v1',
+      protocolVersion: 'v2',
       proofFormats: {
         indy: {
           name: 'requestProof',
@@ -122,10 +57,9 @@ export class PresentProofController extends BaseController {
           requestedPredicates: proofRequestData.requestedPredicates,  
         }
       },
-      comment: data.presentation_request.comment,
     })
 
-    return { message: message.toJSON(), record: proofRecord.toJSON() }
+    return { message: message.toJSON(), record: { thread_id: message.threadId } }
   }
 
   @Post('/send-request')
@@ -153,7 +87,7 @@ export class PresentProofController extends BaseController {
     // if thread id is present
     const proofRecord = await this.agent.proofs.requestProof({
       connectionId: connection.id,
-      protocolVersion: 'v1',
+      protocolVersion: 'v2',
       proofFormats: {
         indy: {
           name: 'requestProof',
@@ -181,8 +115,16 @@ export class PresentProofController extends BaseController {
     }
   ) {
     await this.waitForState(threadId, ProofState.RequestReceived)
-    let proofRecord = await ProofUtils.getProofByThreadId(this.agent, threadId)
 
+    const recordsFound = await this.agent.proofs.getAll()
+    this.agent.config.logger.info(`proof record count: ${recordsFound.length}`)
+
+    //let proofRecord = await ProofUtils.getProofByThreadId(this.agent, threadId)
+
+    let proofRecord = recordsFound.find(item => item.threadId === threadId)
+    if (!proofRecord) {
+      throw new Error('Not found...')
+    }
     const retrievedCredentials = await this.agent.proofs.getRequestedCredentialsForProofRequest({
       proofRecordId: proofRecord.id, 
       config: {
@@ -197,7 +139,7 @@ export class PresentProofController extends BaseController {
     
     if (data.requested_attributes) {
       Object.keys(data.requested_attributes).forEach((key) => {
-        requestedAttributes[key] = retrievedCredentials.proofFormats.indy?.requestedAttributes[key]?.find(
+        requestedAttributes[key] = retrievedCredentials.proofFormats.indy?.requestedAttributes[key].find(
           (a) => a.credentialId === data.requested_attributes[key].cred_id
         ) as RequestedAttribute
       })
@@ -228,10 +170,13 @@ export class PresentProofController extends BaseController {
   @Post('/verify-presentation')
   async verifyPresentation(@BodyParams('id') threadId: string) {
     await this.waitForState(threadId, ProofState.PresentationReceived)
-
+    
     let proofRecord = await ProofUtils.getProofByThreadId(this.agent, threadId)
+
+    proofRecord = await this.agent.proofs.acceptPresentation(proofRecord.id);
+
     if (proofRecord) {
-      return this.mapProofExchangeRecord(await this.agent.proofs.acceptPresentation(proofRecord.id))
+      return {...this.mapProofExchangeRecord(proofRecord), verified: proofRecord.isVerified }
     }
   }
 

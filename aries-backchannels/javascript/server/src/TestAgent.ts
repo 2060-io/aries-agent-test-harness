@@ -1,5 +1,5 @@
 import { $log } from '@tsed/common'
-import { Agent, InitConfig, MediatorPickupStrategy } from '@aries-framework/core'
+import { Agent, AutoAcceptCredential, InitConfig, MediatorPickupStrategy } from '@aries-framework/core'
 import { agentDependencies } from '@aries-framework/node'
 
 import { TsedLogger } from './TsedLogger'
@@ -37,6 +37,7 @@ export async function createAgent({
     publicDidSeed,
     // Needed to accept mediation requests: https://github.com/hyperledger/aries-framework-javascript/issues/668
     autoAcceptMediationRequests: true,
+    autoAcceptCredentials: AutoAcceptCredential.Never,
     useLegacyDidSovPrefix: true,
     logger: new TsedLogger($log),
   }
